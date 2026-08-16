@@ -1,5 +1,91 @@
 # User Manual
 
+## 0. Setup, run, and test
+
+### Prerequisites
+
+- Python **3.12+**
+- [uv](https://docs.astral.sh/uv/) package manager
+
+Change into the project directory (quote the path if it contains spaces):
+
+```bash
+cd "/path/to/Email Parser"
+```
+
+### Install
+
+Full local development (CLI + web + tests):
+
+```bash
+uv sync --extra web --extra dev
+```
+
+| Goal | Command |
+|------|---------|
+| CLI / library only | `uv sync` |
+| + tests / lint | `uv sync --extra dev` |
+| + web UI / API | `uv sync --extra web` |
+| Full local dev | `uv sync --extra web --extra dev` |
+
+### Generate fixtures (required)
+
+Synthetic test emails are **not committed** to git. Generate them before running pytest or using **Run golden corpus** in the web UI:
+
+```bash
+uv run python tests/fixtures/generate.py
+```
+
+This creates 15 `.eml` and `.truth.json` pairs under `tests/fixtures/synthetic/`.
+
+### Run tests
+
+```bash
+uv run pytest tests -q
+```
+
+Verify fixtures first:
+
+```bash
+ls tests/fixtures/synthetic/*.eml | wc -l   # expect 15
+```
+
+### Run the web server
+
+```bash
+uv run uvicorn web.app:app --host 127.0.0.1 --port 8000
+```
+
+Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+### Run the CLI
+
+```bash
+uv run email-parser --help
+uv run email-parser parse tests/fixtures/synthetic/plain_no_attachment.eml
+uv run email-parser metrics --corpus tests/fixtures/synthetic
+```
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `EMAILPARSE_OUTPUT_DIR` | `output` | Artifact root directory |
+| `EMAILPARSE_MAX_DEPTH` | `10` | Maximum nesting depth for attachments and forwards |
+| `EMAILPARSE_MAX_FANOUT` | `200` | Maximum child documents per parent |
+| `EMAILPARSE_TOKEN_BUDGET` | `6000` | Token budget for context markdown |
+| `EMAILPARSE_PDF_ENGINE` | `pdf_pymupdf` | PDF parser plugin name |
+| `EMAILPARSE_DISPLAY_PATH_PREFIX` | `""` | Prefix for reveal-in-Finder paths (Docker sets `${PWD}/output`) |
+
+### Troubleshooting
+
+- **Missing Python packages:** run `uv sync --extra web --extra dev` from the project root; use `uv run` for all commands.
+- **Stale `.venv` after moving the project:** `rm -rf .venv && uv sync --extra web --extra dev`.
+- **`VIRTUAL_ENV` mismatch warning:** safe to ignore when using `uv run`; deactivate other virtual environments to silence it.
+- **Fixture or golden-corpus errors:** run `uv run python tests/fixtures/generate.py`.
+
+See [MANUAL_STEPS.md](MANUAL_STEPS.md) for a hands-on verification checklist.
+
 ## 1. What it does / does not do
 
 This project parses RFC 822 email files (`.eml`) and nested attachments into a canonical JSON document tree. Each block can carry a citation anchor (page and bounding box for PDFs). The pipeline is fully deterministic: the same bytes always produce the same `doc_id` values and block structure.
@@ -172,10 +258,9 @@ Each subsection names the alternative that was rejected.
 
 ## 5. CLI
 
-Install the package, then invoke `email-parser`:
+Install dependencies (see [Section 0](#0-setup-run-and-test)), then invoke `email-parser`:
 
 ```bash
-uv sync --extra dev
 uv run email-parser --help
 ```
 

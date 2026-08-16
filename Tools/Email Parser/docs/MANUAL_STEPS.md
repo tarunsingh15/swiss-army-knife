@@ -5,20 +5,29 @@ Hands-on checklist for setting up, exercising, and verifying the email parser lo
 ## SETUP
 
 1. Install [uv](https://docs.astral.sh/uv/) and Python 3.12+.
-2. From the repository root:
+
+2. Change into the project directory (quote the path if it contains spaces):
 
 ```bash
 cd "/path/to/Email Parser"
 uv sync --extra web --extra dev
 ```
 
-3. Generate deterministic synthetic fixtures:
+**Recovery:** if pytest reports `bad interpreter`, wrong Python version, or `ModuleNotFoundError` for project dependencies, recreate the virtual environment:
+
+```bash
+rm -rf .venv && uv sync --extra web --extra dev
+```
+
+This often happens after moving or renaming the project folder, or when a stale `.venv` points at an old path.
+
+3. **Required:** generate deterministic synthetic fixtures (not committed to git):
 
 ```bash
 uv run python tests/fixtures/generate.py
 ```
 
-This writes `.eml` and `.truth.json` pairs under `tests/fixtures/synthetic/`.
+This writes `.eml` and `.truth.json` pairs under `tests/fixtures/synthetic/`. Without this step, pytest, **Run golden corpus**, and several API tests will fail.
 
 4. Optional: set environment variables (defaults shown):
 
@@ -28,6 +37,8 @@ This writes `.eml` and `.truth.json` pairs under `tests/fixtures/synthetic/`.
 | `EMAILPARSE_MAX_DEPTH` | `10` | Nesting cap |
 | `EMAILPARSE_MAX_FANOUT` | `200` | Max children per document |
 | `EMAILPARSE_TOKEN_BUDGET` | `6000` | Context markdown token budget |
+| `EMAILPARSE_PDF_ENGINE` | `pdf_pymupdf` | PDF parser plugin name |
+| `EMAILPARSE_DISPLAY_PATH_PREFIX` | `""` | Prefix for reveal-in-Finder paths |
 
 5. Start the web server:
 
@@ -43,6 +54,8 @@ docker compose up --build
 
 Open `http://127.0.0.1:8000`.
 
+**Docker tests:** `docker compose --profile test run --rm test` runs pytest in a container. Synthetic fixtures are excluded from the Docker build context, so fixture-dependent tests may fail unless the image generates them at build time.
+
 ## BEFORE TESTING
 
 1. Run the automated test suite:
@@ -51,13 +64,15 @@ Open `http://127.0.0.1:8000`.
 uv run pytest tests -q
 ```
 
+**Note:** if Conda or another virtual environment is active, uv may warn that `VIRTUAL_ENV` does not match the project `.venv`. This is safe to ignore when using `uv run`; uv uses the project environment.
+
 2. Confirm synthetic fixtures exist:
 
 ```bash
 ls tests/fixtures/synthetic/*.eml | wc -l
 ```
 
-Expect 15 cases (see `tests/fixtures/generate.py`).
+Expect 15 cases (see `tests/fixtures/generate.py`). If the count is 0, run step 3 from SETUP.
 
 3. Ensure `output/` is writable (created on first parse).
 
@@ -158,7 +173,7 @@ rm -rf output/*
 
 Regenerate fixtures if needed (`uv run python tests/fixtures/generate.py`).
 
-## Recorded automated results (2026-08-15)
+## Recorded automated results (2026-08-16)
 
 These were verified by the test suite and CLI against `tests/fixtures/synthetic/`, not by clicking the UI.
 

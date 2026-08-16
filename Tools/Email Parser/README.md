@@ -2,31 +2,117 @@
 
 Local email and PDF attachment parser that emits citation-anchored JSON for search and RAG workflows. Parses `.eml` files and nested attachments deterministically—no LLM, embeddings, or OCR in the parse path.
 
-## Quick start
+## Prerequisites
+
+- **Python 3.12+** (see `.python-version`)
+- **[uv](https://docs.astral.sh/uv/)** package manager
+
+The project path contains a space—always quote it in shell commands:
+
+```bash
+cd "/path/to/Email Parser"
+```
+
+## Setup
+
+Install dependencies for CLI, web UI, and tests:
 
 ```bash
 uv sync --extra web --extra dev
+```
+
+**Required:** generate synthetic test fixtures (they are gitignored and not committed):
+
+```bash
 uv run python tests/fixtures/generate.py
-uv run pytest tests -q
+```
+
+This writes 15 `.eml` and `.truth.json` pairs under `tests/fixtures/synthetic/`. Skip this step and pytest, the golden corpus UI action, and several integration tests will fail.
+
+### Install tiers
+
+| Goal | Command |
+|------|---------|
+| CLI / library only | `uv sync` |
+| + tests / lint | `uv sync --extra dev` |
+| + web UI / API | `uv sync --extra web` |
+| Full local dev | `uv sync --extra web --extra dev` |
+
+## Run
+
+### Web UI and API
+
+```bash
 uv run uvicorn web.app:app --host 127.0.0.1 --port 8000
 ```
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
-CLI:
+### CLI
 
 ```bash
+uv run email-parser --help
+uv run email-parser version
 uv run email-parser parse tests/fixtures/synthetic/plain_no_attachment.eml
 uv run email-parser metrics --corpus tests/fixtures/synthetic
+uv run email-parser compare output/runs/A output/runs/B
 ```
 
-## Docker
+### Docker
 
 ```bash
 docker compose up --build
 ```
 
-Artifacts are written to `./output` (mounted volume).
+Artifacts are written to `./output` (mounted volume). The web UI is available at [http://127.0.0.1:8000](http://127.0.0.1:8000).
+
+To run tests inside Docker:
+
+```bash
+docker compose --profile test run --rm test
+```
+
+Note: synthetic fixtures are excluded from the Docker build context. The test profile may fail fixture-dependent tests unless the image generates them at build time.
+
+## Test
+
+```bash
+uv run pytest tests -q
+```
+
+Confirm fixtures exist before running:
+
+```bash
+ls tests/fixtures/synthetic/*.eml | wc -l   # expect 15
+```
+
+For snapshot updates (review diffs first):
+
+```bash
+uv run pytest tests/test_snapshots.py --snapshot-update
+```
+
+## Troubleshooting
+
+**`ModuleNotFoundError` (pymupdf, selectolax, puremagic, etc.)**
+
+Run `uv sync --extra web --extra dev` from the project directory. Do not rely on a separate Conda or global Python environment.
+
+**`bad interpreter` or wrong Python version**
+
+The project `.venv` may be stale after moving or renaming the directory. Recreate it:
+
+```bash
+rm -rf .venv && uv sync --extra web --extra dev
+```
+
+**`VIRTUAL_ENV` mismatch warning**
+
+If another virtual environment is active (e.g. Conda), uv prints a warning and ignores it. This is safe when using `uv run`. To silence the warning, run `deactivate` or `unset VIRTUAL_ENV`.
+
+**Missing fixtures / golden corpus 404**
+
+Run `uv run python tests/fixtures/generate.py`. Synthetic fixtures are generated locally and not checked into git.
 
 ## Documentation
 
@@ -34,56 +120,3 @@ Artifacts are written to `./output` (mounted volume).
 - [Manual Steps](docs/MANUAL_STEPS.md) — setup and hands-on test checklist
 - [Adding a Parser](docs/ADDING_A_PARSER.md) — plug-in protocol and worked example
 - [Metrics](docs/METRICS.md) — Tier A/B/C metric definitions
-
-## MY NOTES:
-MIME Parsing
-- Outlook doesnt use MIME format, it uses MSG, a compound file binary format (CFBF), a single file containing a entire internal hierarchy of nested files and folders.
-    - Requires the “extract-msg” plugin to handle this tpye
- - Gmail will work with the stdlibrary “email”
-
-File Type Detection (Sniffing)
-- Dont trust file names as they can be wrongly labelled.
-- “Puremagic” for a purely python library, requires no system binary installation. (Portable)
-    - “Python-magic” can be the upgrade.
-
-Body:
-- Lxml and BeautifulSoup can be used for XML and HTML parsing, but “selectolax” is significantly faster.
-- Using html2text will flatten it to markdown, discarding the hierarchy or the structure.
-
-Quoted-reply stripping:
-- Extracting only the newly typed message from an email thread
-- Single largest token sink in email, we need to ignore the massive chain of prev emails that get appended to the bottom
-- Using Mailgun’s “Talon”, this is open-source, a the only major library that uses ML along with traditional regex.
-
-PDF:
-- We need to handle native PDF files, Scanned PDF files or Hybrid PDF files.
-- Native PDF files are easy and dirt-cheap to process, the other two types require OCR integration to identify embedded elements.
-- For native PDF: using the “PyMuPDF” library which is licensed under AGPL, which is free for personal user by paid for commercial use.
-    - Pros: But its is lightning fast, free for personal use and can handle document metadata, annotation and even extract images
-    - Cons: Know to have issues with the order, especially can scramble get if the doc has a complex multi-column layout.
-    - Wrapper: Recently, “pymupdf4llm” wrapper was released to convert pymupdf’s speed to LLM-ready markdown.
--  If PDFs are full of tables, invoices or complex layouts, I can use “pdfplumber”
-    - Pro: uses geometry and visual elements to mathematically reconstruct tables with excellent accuracy, also includes visual debugging tools. Has better TEDS than PyMuPDF.
-    - Cons: Has a lot of heavy math, it is slower compared to PyMuPDF. Doesn’t do well with doc metadata, encryption stets, AcroForm field (Acrobat Form, fillable fields in PDFs) values, Will need to use “pypdf” along with it to overcome. (AcroForm fields sit as widgets on top of actual unchangeable PDF files to capture inputs)
-- For RAG, we use “Docling” if feeding to LLMs or Vectors DBs
-    - Pros: Analyses reading order, capture headers, tables in markdown formats and fixes multi-column reading order issues with traditional native PDFs
-
-> TEDS = Tree-Edit-Distance-based Similarity, an industry-std benchmark to score how accurately an AI or parsing library extracts a table from a doc.
-
-Schema:
-- Pydantic, helps validate the parser boundaries, auto-generated JSON schema. 
-
-Storage:
-- One SQLLite file should do.
-- Need to handle:
-    - Structured fields
-    - Unstructured JSON
-    - Sqlite-vec = adds vector search in the same file. (Only KNN search, ANN is still under dev)
-
-
-Security:
-- Need to handle the security, attacker injections, cut off from internet access run in sandboxes
-- ACL-aware retrievals
-
-Note:
-- Ignore LangChain or LlamaIndex - their doc abstraction is weaker - no typed edge, no page/bbox anchors
