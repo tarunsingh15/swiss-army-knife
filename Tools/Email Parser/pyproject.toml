@@ -1,0 +1,65 @@
+[project]
+name = "email-parser"
+version = "0.1.0"
+description = "Local email + PDF attachment parser that emits citation-anchored JSON for AI/RAG use."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2",
+  "pymupdf==1.28.2",
+  "puremagic",
+  "selectolax",
+  "charset-normalizer",
+  "quotequail",
+  "typer",
+  "tiktoken",
+]
+
+[project.optional-dependencies]
+web = [
+  "fastapi>=0.115.0",
+  "uvicorn",
+  "python-multipart",
+  "jinja2",
+  "httpx",
+]
+dev = [
+  "pytest",
+  "syrupy>=5.5.3",
+  "ruff",
+  "mypy",
+  "hypothesis",
+  "rapidfuzz",
+  "apted",
+]
+
+[project.scripts]
+email-parser = "email_parser.cli:app"
+
+[project.entry-points."email_parser.parsers"]
+email_mime = "email_parser.file_parsers.email_mime:EmailMimeParser"
+pdf_pymupdf = "email_parser.file_parsers.pdf_pymupdf:PdfPymupdfParser"
+text_plain = "email_parser.file_parsers.text_plain:TextPlainParser"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["email_parser", "web"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["email_parser"]
+ignore_missing_imports = true

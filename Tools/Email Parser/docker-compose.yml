@@ -1,0 +1,19 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./output:/app/output
+    environment:
+      EMAILPARSE_OUTPUT_DIR: /app/output
+      EMAILPARSE_DISPLAY_PATH_PREFIX: ${PWD}/output
+  test:
+    build:
+      context: .
+      target: builder
+    profiles: ["test"]
+    working_dir: /app
+    environment:
+      EMAILPARSE_OUTPUT_DIR: /tmp/emailparse-output
+    command: ["/app/.venv/bin/pytest", "tests", "-q"]

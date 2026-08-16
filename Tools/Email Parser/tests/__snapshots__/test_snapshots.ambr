@@ -1,0 +1,69 @@
+# serializer version: 1
+# name: test_plain_email_snapshot
+  dict({
+    'blocks': list([
+      dict({
+        'anchor': dict({
+          'bbox': None,
+          'page': None,
+          'quads': None,
+        }),
+        'block_id': 'sha256:91aa60e3c618e5ead5e2289b02f6612881a55dc43036350b921e298bc16bc197:b0000:paragraph',
+        'child_doc_id': None,
+        'rows': None,
+        'text': 'This is a plain text note with no attachments.',
+        'type': 'paragraph',
+      }),
+    ]),
+    'depth': 0,
+    'doc_id': 'sha256:91aa60e3c618e5ead5e2289b02f6612881a55dc43036350b921e298bc16bc197',
+    'extractions': list([
+    ]),
+    'metadata': dict({
+      'common': dict({
+        'byte_size': 309,
+        'created_at': None,
+        'filename': 'plain_no_attachment.eml',
+        'language': None,
+        'page_count': None,
+        'title': 'Plain note',
+      }),
+      'native': dict({
+        'cc': None,
+        'chars_per_page': None,
+        'date_original': 'Wed, 04 Mar 2026 10:02:00 -0400',
+        'date_utc': '2026-03-04T14:02:00+00:00',
+        'from_addr': 'alice@example.com',
+        'from_domain': 'example.com',
+        'from_name': 'Alice Example',
+        'has_text_layer': None,
+        'in_reply_to': None,
+        'message_id': '<plain-no-attachment@fixtures.example>',
+        'needs_ocr': None,
+        'producer': None,
+        'references': None,
+        'subject': 'Plain note',
+        'to': list([
+          dict({
+            'addr': 'bob@example.com',
+            'domain': 'example.com',
+            'name': '',
+          }),
+        ]),
+      }),
+    }),
+    'mime_type': 'message/rfc822',
+    'ordinal': 0,
+    'parent_id': None,
+    'path': '',
+    'provenance': dict({
+      'parser': 'email_mime',
+      'status': 'ok',
+      'warnings': list([
+      ]),
+    }),
+    'relation_to_parent': None,
+    'root_id': 'sha256:91aa60e3c618e5ead5e2289b02f6612881a55dc43036350b921e298bc16bc197',
+    'source_type': 'email',
+  })
+# ---

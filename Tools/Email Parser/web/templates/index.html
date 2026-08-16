@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Email Parser</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script type="module">
+    import PostalMime from "https://cdn.jsdelivr.net/npm/postal-mime@2.4.3/+esm";
+    window.PostalMime = PostalMime;
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/renderjson@1.4.0/renderjson.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <h1>Email Parser</h1>
+    <p class="subtitle">Upload, parse, and inspect citation-anchored output.</p>
+  </header>
+
+  <main id="app">
+    <!-- STATE 1: UPLOAD -->
+    <section id="state-upload" class="state-panel">
+      <div class="two-col">
+        <div class="col-left">
+          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Drop files here">
+            <p class="dropzone-title">Drop email files here</p>
+            <p class="dropzone-hint">.eml, .msg, .mbox, .pdf</p>
+            <label class="file-label">
+              <span class="btn">Choose files</span>
+              <input id="file-input" type="file" multiple accept=".eml,.msg,.mbox,.pdf">
+            </label>
+          </div>
+          <div class="upload-actions">
+            <button id="btn-clear" type="button" class="btn secondary" disabled>Clear list</button>
+            <button id="btn-submit" type="button" class="btn primary" disabled>Submit for parsing</button>
+          </div>
+        </div>
+        <div class="col-right">
+          <h2 class="panel-title">Messages to parse</h2>
+          <div id="file-list" class="message-list" aria-live="polite"></div>
+          <p id="file-list-empty" class="empty-hint">No files selected yet.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATE 2: PROCESSING -->
+    <section id="state-processing" class="state-panel hidden">
+      <div class="processing-bar">
+        <div class="progress-wrap">
+          <span id="progress-text">0 / 0</span>
+          <div class="progress-track">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+        </div>
+        <button id="btn-cancel" type="button" class="btn danger">Cancel</button>
+      </div>
+      <div class="two-col">
+        <div class="col-left">
+          <h2 class="panel-title">Processing</h2>
+          <p id="job-id-label" class="job-id"></p>
+        </div>
+        <div class="col-right">
+          <div id="processing-list" class="message-list" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STATE 3: RESULTS -->
+    <section id="state-results" class="state-panel hidden">
+      <div class="results-layout">
+        <aside class="results-sidebar">
+          <h2 class="panel-title">Processed emails</h2>
+          <div id="email-list" class="email-list" aria-live="polite"></div>
+        </aside>
+        <div class="results-main">
+          <nav id="breadcrumb" class="breadcrumb hidden" aria-label="Document navigation"></nav>
+          <div id="detail" class="detail-pane">
+            <p class="empty-hint">Select an email to inspect its output.</p>
+          </div>
+        </div>
+      </div>
+
+      <section id="metrics-panel" class="metrics-panel">
+        <div class="metrics-header">
+          <h2>Run metrics (not accuracy)</h2>
+          <button id="btn-golden" type="button" class="btn secondary">Run golden corpus</button>
+        </div>
+        <pre id="metrics-view" class="metrics-view"></pre>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

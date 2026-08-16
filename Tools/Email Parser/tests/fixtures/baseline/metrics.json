@@ -1,0 +1,31 @@
+{
+  "health": {
+    "anchor_coverage": 0.5365853658536586,
+    "chars_per_page_avg": 42.5,
+    "cid_resolution_rate": 1.0,
+    "invariant_violations": [],
+    "quoted_text_ratio": 0.0018262206843521723,
+    "tier": "B"
+  },
+  "run": {
+    "accepted": 27,
+    "attachments_by_type": {
+      "application/pdf": 12,
+      "image/png": 1,
+      "message/rfc822": 2
+    },
+    "deduped": 0,
+    "docs_produced": 30,
+    "elapsed_s": 0.14925520803080872,
+    "emails_parsed": 17,
+    "failures_by_status": {
+      "failed": 2,
+      "ok": 27,
+      "unsupported": 1
+    },
+    "max_depth": 2,
+    "partial_successes": 3,
+    "rejected": 0,
+    "tier": "A"
+  }
+}
