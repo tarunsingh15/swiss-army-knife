@@ -23,13 +23,14 @@
       <div class="two-col">
         <div class="col-left">
           <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Drop files here">
-            <p class="dropzone-title">Drop email files here</p>
-            <p class="dropzone-hint">.eml, .msg, .mbox, .pdf</p>
+            <p class="dropzone-title">Drop email or PDF files here</p>
+            <p class="dropzone-hint">.eml, .msg, .mbox, .pdf — scanned PDFs need <code>uv sync --extra ocr</code></p>
             <label class="file-label">
               <span class="btn">Choose files</span>
               <input id="file-input" type="file" multiple accept=".eml,.msg,.mbox,.pdf">
             </label>
           </div>
+          <p id="ocr-hint" class="ocr-hint hidden" role="status"></p>
           <div class="upload-actions">
             <button id="btn-clear" type="button" class="btn secondary" disabled>Clear list</button>
             <button id="btn-submit" type="button" class="btn primary" disabled>Submit for parsing</button>
@@ -69,7 +70,7 @@
     <section id="state-results" class="state-panel hidden">
       <div class="results-layout">
         <aside class="results-sidebar">
-          <h2 class="panel-title">Processed emails</h2>
+          <h2 class="panel-title">Processed items</h2>
           <div id="email-list" class="email-list" aria-live="polite"></div>
         </aside>
         <div class="results-main">

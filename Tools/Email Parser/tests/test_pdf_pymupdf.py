@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 import pymupdf
+import pytest
 
 from email_parser.file_parsers.base import Blob, ParseContext
 from email_parser.file_parsers.pdf_pymupdf import PdfPymupdfParser
@@ -162,3 +163,103 @@ def test_render_thumbnail_returns_png_bytes() -> None:
     parser = _parser()
     png_bytes = parser.render_thumbnail(raw, page=1, clip=(0.0, 0.0, 200.0, 200.0), dpi=72)
     assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def _make_scanned_pdf() -> bytes:
+    """Create a minimal image-only PDF with no text layer."""
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
+        "de0000000c4944415408d763f8ffff3f0005fe02fe0dc59a7d0000000049454e44ae426082"
+    )
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_image(pymupdf.Rect(72, 72, 472, 192), stream=png)
+    payload = doc.tobytes()
+    doc.close()
+    return payload
+
+
+def test_ocr_skipped_for_born_digital_attachment() -> None:
+    """Born-digital PDF attachments do not trigger the OCR gate."""
+    from email_parser.config import load_settings
+    from email_parser.file_parsers import pdf_pymupdf
+    from pdf_tool import parse_pdf as tool_parse_pdf
+
+    raw = _make_text_pdf("Born digital attachment text")
+    blob = Blob(
+        raw=raw,
+        filename="attachment.pdf",
+        mime_type="application/pdf",
+        relation_to_parent=RelationType.attachment,
+    )
+    ctx = ParseContext(parent_id="sha256:parent", root_id="sha256:parent")
+    pdf_result = tool_parse_pdf(raw, filename="attachment.pdf")
+    settings = load_settings()
+
+    assert pdf_pymupdf.should_run_ocr(blob, ctx, pdf_result, settings) is False
+
+    parsed = _parser().parse(blob, ctx)
+    assert parsed.document.provenance.parser == "pdf_pymupdf"
+    assert parsed.document.metadata.native.needs_ocr is False
+
+
+def test_should_run_ocr_false_for_born_digital_root_pdf() -> None:
+    """Direct born-digital PDF uploads do not trigger OCR."""
+    from email_parser.config import load_settings
+    from email_parser.file_parsers import pdf_pymupdf
+    from pdf_tool import parse_pdf as tool_parse_pdf
+
+    raw = _make_text_pdf("Born digital root upload")
+    blob = Blob(raw=raw, filename="upload.pdf", mime_type="application/pdf")
+    ctx = ParseContext()
+    pdf_result = tool_parse_pdf(raw, filename="upload.pdf")
+    settings = load_settings()
+
+    assert pdf_pymupdf.should_run_ocr(blob, ctx, pdf_result, settings) is False
+
+
+def test_should_run_ocr_true_for_scanned_attachment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scanned PDF attachments pass the OCR gate when document_parser is available."""
+    from email_parser.config import load_settings
+    from email_parser.file_parsers import pdf_pymupdf
+    from pdf_tool import parse_pdf as tool_parse_pdf
+
+    monkeypatch.setattr(pdf_pymupdf, "_doc_parser_is_available", lambda: True)
+
+    raw = _make_scanned_pdf()
+    blob = Blob(
+        raw=raw,
+        filename="scan.pdf",
+        mime_type="application/pdf",
+        relation_to_parent=RelationType.attachment,
+    )
+    ctx = ParseContext(parent_id="sha256:parent", root_id="sha256:parent")
+    pdf_result = tool_parse_pdf(raw, filename="scan.pdf")
+    settings = load_settings()
+
+    assert pdf_result.metadata.needs_ocr is True
+    assert pdf_pymupdf.should_run_ocr(blob, ctx, pdf_result, settings) is True
+
+
+@pytest.mark.ocr
+def test_ocr_runs_for_scanned_attachment() -> None:
+    """Scanned PDF attachments use document_parser when OCR is installed."""
+    try:
+        from document_parser import is_available
+    except ImportError:
+        pytest.skip("document-parser not installed (uv sync --extra ocr)")
+    if not is_available():
+        pytest.skip("PaddleOCR is not installed")
+
+    raw = _make_scanned_pdf()
+    blob = Blob(
+        raw=raw,
+        filename="scan.pdf",
+        mime_type="application/pdf",
+        relation_to_parent=RelationType.attachment,
+    )
+    ctx = ParseContext(parent_id="sha256:parent", root_id="sha256:parent")
+
+    parsed = _parser().parse(blob, ctx)
+    assert "document_parser" in parsed.document.provenance.parser
+    assert parsed.document.blocks

@@ -32,6 +32,7 @@ dev = [
   "rapidfuzz",
   "apted",
 ]
+ocr = ["document-parser"]
 
 [project.scripts]
 email-parser = "email_parser.cli:app"
@@ -47,6 +48,7 @@ build-backend = "hatchling.build"
 
 [tool.uv.sources]
 pdf-tool = { path = "../pdf_tool", editable = true }
+document-parser = { path = "../document_parser", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["email_parser", "web"]
@@ -61,6 +63,9 @@ select = ["E", "F", "I", "UP"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+  "ocr: tests requiring document-parser with PaddleOCR installed (uv sync --extra ocr)",
+]
 
 [tool.mypy]
 python_version = "3.12"

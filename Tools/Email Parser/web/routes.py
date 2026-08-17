@@ -20,10 +20,11 @@ from email_parser.ai_context.citations import render_thumbnail
 from email_parser.ai_context.context_view import render_context
 from email_parser.config import load_settings
 from email_parser.ids import hash_prefix
-from email_parser.models import Document
-from email_parser.run import root_emails
+from email_parser.models import Document, SourceType
+from email_parser.run import root_documents, root_emails
 from email_parser.storage.sqlite_index import SqliteIndex
 from email_parser.storage.writer import Store
+from pdf_tool import parse_pdf as pdf_tool_parse_pdf
 from web.jobs import JOBS, JOBS_LOCK, Job, get_job, parse_one, run_job
 from web.peek import peek_headers
 
@@ -34,6 +35,42 @@ class RevealRequest(BaseModel):
     """Request body for revealing a stored file in the host file manager."""
 
     doc_id: str
+
+
+def _ocr_available() -> bool:
+    """Return True when the optional document_parser OCR backend is installed."""
+    try:
+        from document_parser import is_available
+    except ImportError:
+        return False
+    return is_available()
+
+
+def _document_row(doc: Document, documents: list[Document]) -> dict[str, Any]:
+    """Build a sidebar row for one root email or PDF document."""
+    native = doc.metadata.native
+    common = doc.metadata.common
+    if doc.source_type == SourceType.email:
+        kind = "email"
+        label = native.subject or common.filename or doc.doc_id
+        sender = native.from_addr or native.from_name
+        date = native.date_utc or native.date_original
+    else:
+        kind = "pdf"
+        label = common.filename or common.title or doc.doc_id
+        sender = None
+        date = None
+    return {
+        "doc_id": doc.doc_id,
+        "kind": kind,
+        "label": label,
+        "sender": sender,
+        "date": date,
+        "status": doc.provenance.status.value,
+        "needs_ocr": bool(native.needs_ocr),
+        "ocr_used": "document_parser" in doc.provenance.parser,
+        "attachment_count": _attachment_count(doc.doc_id, documents),
+    }
 
 
 def _storage_paths_dict(store: Store, doc_id: str, doc: Document | None = None) -> dict[str, str]:
@@ -192,7 +229,13 @@ async def index(request: Request) -> Response:
 @router.get("/health")
 async def health() -> dict[str, bool]:
     """Return basic service health and container detection."""
-    return {"ok": True, "containerized": Path("/.dockerenv").exists()}
+    settings = load_settings()
+    return {
+        "ok": True,
+        "containerized": Path("/.dockerenv").exists(),
+        "ocr_available": _ocr_available(),
+        "ocr_enabled": settings.ocr_enabled,
+    }
 
 
 @router.post("/peek")
@@ -203,6 +246,24 @@ async def peek(files: list[UploadFile] = File(...)) -> list[dict]:
         raw = await upload.read()
         filename = upload.filename or "upload"
         results.extend(peek_headers(raw, filename))
+    return results
+
+
+@router.post("/peek/pdf")
+async def peek_pdf(files: list[UploadFile] = File(...)) -> list[dict]:
+    """Return quick PDF metadata previews for uploaded PDF files."""
+    results: list[dict] = []
+    for upload in files:
+        raw = await upload.read()
+        filename = upload.filename or "upload.pdf"
+        result = pdf_tool_parse_pdf(raw, filename=filename)
+        results.append(
+            {
+                "filename": filename,
+                "page_count": result.metadata.page_count,
+                "needs_ocr": result.metadata.needs_ocr,
+            }
+        )
     return results
 
 
@@ -323,6 +384,17 @@ async def job_emails(job_id: str) -> list[dict]:
             }
         )
     return results
+
+
+@router.get("/jobs/{job_id}/documents")
+async def job_documents(job_id: str) -> list[dict]:
+    """Return processed root emails and direct-upload PDFs for a completed job."""
+    job = get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    documents = _all_documents_for_job(job)
+    roots = root_documents(documents)
+    return [_document_row(doc, documents) for doc in roots]
 
 
 @router.get("/documents/{doc_id}")

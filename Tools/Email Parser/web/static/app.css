@@ -116,6 +116,13 @@ body {
   font-size: 0.9rem;
 }
 
+.dropzone-hint code {
+  font-size: 0.85em;
+  background: #eef1f6;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+
 .file-label input[type="file"] {
   display: none;
 }
@@ -279,6 +286,15 @@ body {
 .badge.ok { background: #dcfce7; color: var(--ok); }
 .badge.warning { background: #fef3c7; color: var(--warning); }
 .badge.failed { background: #fee2e2; color: var(--failed); }
+.badge.pdf { background: #e0e7ff; color: #3730a3; }
+.badge.ocr { background: #f3e8ff; color: #6b21a8; }
+.badge.scanned { background: #fef3c7; color: var(--warning); }
+
+.ocr-hint {
+  margin: 0.75rem 0 0;
+  font-size: 0.88rem;
+  color: var(--warning);
+}
 
 /* Processing bar */
 .processing-bar {

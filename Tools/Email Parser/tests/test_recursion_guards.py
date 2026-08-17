@@ -26,6 +26,9 @@ def _make_settings(**overrides: int) -> Settings:
         max_fanout=overrides.get("max_fanout", 5),
         display_path_prefix="",
         token_budget=6000,
+        ocr_enabled=True,
+        ocr_dpi=200,
+        ocr_min_chars=20,
     )
 
 

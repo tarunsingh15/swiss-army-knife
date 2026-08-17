@@ -67,7 +67,11 @@ def _wait_for_job(client: TestClient, job_id: str, *, timeout_s: float = 10.0) -
 
 def test_health_and_index(client: TestClient) -> None:
     """Health and root endpoints respond."""
-    assert client.get("/health").json() == {"ok": True, "containerized": False}
+    health = client.get("/health").json()
+    assert health["ok"] is True
+    assert health["containerized"] is False
+    assert "ocr_available" in health
+    assert "ocr_enabled" in health
     response = client.get("/")
     assert response.status_code == 200
     assert "Email Parser" in response.text
@@ -215,3 +219,39 @@ def test_golden_endpoint(client: TestClient) -> None:
     assert "run" in payload
     assert "health" in payload
     assert payload["run"]["files"] > 0
+
+
+def test_peek_pdf_endpoint(client: TestClient) -> None:
+    """POST /peek/pdf returns page_count and needs_ocr for PDF uploads."""
+    pdf = _make_pdf()
+    response = client.post(
+        "/peek/pdf",
+        files=[("files", ("sample.pdf", pdf, "application/pdf"))],
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["filename"] == "sample.pdf"
+    assert payload[0]["page_count"] == 1
+    assert payload[0]["needs_ocr"] is False
+
+
+def test_direct_pdf_upload_lists_in_root_documents(client: TestClient) -> None:
+    """Direct PDF uploads appear in /jobs/{id}/documents."""
+    pdf = _make_pdf()
+    create = client.post(
+        "/jobs",
+        files=[("files", ("sample.pdf", pdf, "application/pdf"))],
+    )
+    assert create.status_code == 200
+    job_id = create.json()["job_id"]
+    status = _wait_for_job(client, job_id)
+    assert status["status"] == "done"
+
+    documents = client.get(f"/jobs/{job_id}/documents").json()
+    assert len(documents) == 1
+    row = documents[0]
+    assert row["kind"] == "pdf"
+    assert row["label"] == "sample.pdf"
+    assert row["needs_ocr"] is False
+    assert row["ocr_used"] is False

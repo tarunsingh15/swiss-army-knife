@@ -114,3 +114,12 @@ def root_emails(documents: list[Document]) -> list[Document]:
         for d in documents
         if d.parent_id is None and d.source_type == SourceType.email
     ]
+
+
+def root_documents(documents: list[Document]) -> list[Document]:
+    """Return top-level emails and direct-upload PDFs for the UI sidebar."""
+    return [
+        d
+        for d in documents
+        if d.parent_id is None and d.source_type in {SourceType.email, SourceType.pdf}
+    ]

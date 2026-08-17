@@ -1,24 +1,22 @@
-"""Email-parser adapter around the standalone pdf_tool package."""
+"""Email-parser adapter around pdf_tool with optional document_parser OCR fallback."""
 
 from __future__ import annotations
 
+from email_parser.config import Settings, load_settings
+from email_parser.file_parsers._pdf_mapping import to_child_blobs, to_email_blocks
 from email_parser.file_parsers.base import Blob, ParseContext, ParseResult
-from email_parser.ids import make_block_id, make_doc_id
+from email_parser.ids import make_doc_id
 from email_parser.models import (
-    Anchor,
-    Block,
-    BlockType,
     CommonMetadata,
     Document,
     DocumentMetadata,
     NativeMetadata,
     ParseStatus,
     Provenance,
-    RelationType,
     SourceType,
 )
 from pdf_tool import (
-    PdfBlockType,
+    PdfParseResult,
     PdfParseStatus,
     is_pdf,
     parse_pdf,
@@ -27,52 +25,50 @@ from pdf_tool import (
 )
 from pdf_tool.pymupdf_engine import ENGINE_VERSION
 
-_BLOCK_TYPE_MAP: dict[PdfBlockType, BlockType] = {
-    PdfBlockType.paragraph: BlockType.paragraph,
-    PdfBlockType.heading: BlockType.heading,
-    PdfBlockType.table: BlockType.table,
-    PdfBlockType.form_field: BlockType.form_field,
-}
+
+def _doc_parser_is_available() -> bool:
+    """Return True when the optional document_parser package is installed and usable."""
+    try:
+        from document_parser import is_available
+    except ImportError:
+        return False
+    return is_available()
 
 
-def _to_email_blocks(doc_id: str, result_blocks) -> list[Block]:
-    """Map generic pdf_tool blocks into email-parser Block models."""
-    blocks: list[Block] = []
-    for ordinal, item in enumerate(result_blocks):
-        block_type = _BLOCK_TYPE_MAP[item.block_type]
-        anchor = None
-        if item.anchor is not None:
-            anchor = Anchor(page=item.anchor.page, bbox=item.anchor.bbox)
-        blocks.append(
-            Block(
-                block_id=make_block_id(doc_id, ordinal, block_type.value),
-                type=block_type,
-                text=item.text,
-                rows=item.rows,
-                anchor=anchor,
-            )
-        )
-    return blocks
+def _pdf_needs_ocr(result: PdfParseResult, min_chars: int) -> bool:
+    """Return True when born-digital extraction is insufficient for OCR fallback."""
+    if result.metadata.needs_ocr:
+        return True
+    if result.status != PdfParseStatus.ok:
+        return False
+    if not result.blocks:
+        return True
+    total_chars = sum(result.metadata.chars_per_page or [])
+    return total_chars < min_chars
 
 
-def _to_child_blobs(embedded_files) -> list[Blob]:
-    """Map embedded pdf_tool files into pipeline child blobs."""
-    child_blobs: list[Blob] = []
-    for index, item in enumerate(embedded_files):
-        child_blobs.append(
-            Blob(
-                raw=item.raw,
-                filename=item.filename,
-                mime_type=item.mime_type,
-                relation_to_parent=RelationType.embedded_file,
-                ordinal=index,
-            )
-        )
-    return child_blobs
+def should_run_ocr(
+    blob: Blob,
+    ctx: ParseContext,
+    pdf_result: PdfParseResult,
+    settings: Settings,
+) -> bool:
+    """Decide whether OCR should run for this PDF blob."""
+    if not settings.ocr_enabled or not _doc_parser_is_available():
+        return False
+    if not _pdf_needs_ocr(pdf_result, settings.ocr_min_chars):
+        return False
+    # Direct PDF upload (UI or CLI): root blob, no parent.
+    if blob.relation_to_parent is None and ctx.parent_id is None:
+        return True
+    # Email attachment / embedded / forwarded PDF child.
+    if blob.relation_to_parent is not None:
+        return True
+    return False
 
 
 class PdfPymupdfParser:
-    """Email-parser plugin that delegates PDF work to pdf_tool."""
+    """Email-parser plugin that delegates PDF work to pdf_tool with optional OCR."""
 
     name = "pdf_pymupdf"
     version = ENGINE_VERSION
@@ -83,10 +79,49 @@ class PdfPymupdfParser:
         return is_pdf(sniffed, mime_type)
 
     def parse(self, blob: Blob, ctx: ParseContext) -> ParseResult:
-        """Parse a PDF blob via pdf_tool and map the result to email-parser models."""
+        """Parse a PDF via pdf_tool and optionally fall back to document_parser OCR."""
+        settings = load_settings()
         raw = blob.raw
         doc_id = make_doc_id(raw)
         result = parse_pdf(raw, filename=blob.filename)
+
+        warnings = list(result.warnings)
+        blocks = to_email_blocks(doc_id, result.blocks)
+        parser_name = self.name
+        native = NativeMetadata(
+            producer=result.metadata.producer,
+            has_text_layer=result.metadata.has_text_layer,
+            needs_ocr=result.metadata.needs_ocr,
+            chars_per_page=result.metadata.chars_per_page,
+        )
+
+        if should_run_ocr(blob, ctx, result, settings):
+            from document_parser import parse_pdf as ocr_parse_pdf
+
+            ocr_result = ocr_parse_pdf(raw, filename=blob.filename, dpi=settings.ocr_dpi)
+            warnings.extend(ocr_result.warnings)
+            if ocr_result.status.value == "ok" and ocr_result.blocks:
+                blocks = to_email_blocks(doc_id, ocr_result.blocks)
+                parser_name = f"{self.name}+document_parser"
+                native = native.model_copy(
+                    update={
+                        "needs_ocr": ocr_result.metadata.needs_ocr,
+                        "chars_per_page": ocr_result.metadata.chars_per_page,
+                        "has_text_layer": ocr_result.metadata.has_text_layer,
+                        "ocr_engine": ocr_result.metadata.ocr_engine or "paddle",
+                    }
+                )
+            elif ocr_result.warnings:
+                warnings.append(
+                    "OCR fallback did not produce blocks; using born-digital extraction"
+                )
+        elif _pdf_needs_ocr(result, settings.ocr_min_chars) and not _doc_parser_is_available():
+            warnings.append(
+                "PDF requires OCR but document_parser is not installed "
+                "(install with: uv sync --extra ocr)"
+            )
+        elif _pdf_needs_ocr(result, settings.ocr_min_chars) and not settings.ocr_enabled:
+            warnings.append("PDF requires OCR but EMAILPARSE_OCR_ENABLED is false")
 
         status = ParseStatus.ok if result.status == PdfParseStatus.ok else ParseStatus.failed
         document = Document(
@@ -105,25 +140,20 @@ class PdfPymupdfParser:
                     page_count=result.metadata.page_count,
                     filename=result.metadata.filename,
                 ),
-                native=NativeMetadata(
-                    producer=result.metadata.producer,
-                    has_text_layer=result.metadata.has_text_layer,
-                    needs_ocr=result.metadata.needs_ocr,
-                    chars_per_page=result.metadata.chars_per_page,
-                ),
+                native=native,
             ),
-            blocks=_to_email_blocks(doc_id, result.blocks),
+            blocks=blocks,
             provenance=Provenance(
-                parser=self.name,
+                parser=parser_name,
                 parser_version=self.version,
                 parsed_at=None,
                 status=status,
-                warnings=list(result.warnings),
+                warnings=warnings,
             ),
         )
         return ParseResult(
             document=document,
-            child_blobs=_to_child_blobs(result.embedded_files),
+            child_blobs=to_child_blobs(result.embedded_files),
         )
 
     def search_quote(

@@ -20,6 +20,9 @@
    * @property {ItemStatus} status
    * @property {string|null} docId
    * @property {number} jobIndex
+   * @property {'email'|'pdf'|null} kind
+   * @property {number|null} pageCount
+   * @property {boolean} needsOcr
    */
 
   const $ = (sel) => document.querySelector(sel);
@@ -44,6 +47,7 @@
   const breadcrumb = $("#breadcrumb");
   const metricsView = $("#metrics-view");
   const toast = $("#toast");
+  const ocrHint = $("#ocr-hint");
 
   /** @type {MessageItem[]} */
   let messages = [];
@@ -53,6 +57,10 @@
   let eventSource = null;
   /** @type {boolean} */
   let serverContainerized = false;
+  /** @type {boolean} */
+  let ocrAvailable = false;
+  /** @type {boolean} */
+  let ocrEnabled = false;
   /** @type {string|null} */
   let selectedEmailDocId = null;
   /** @type {{ docId: string, label: string }[]} */
@@ -150,6 +158,39 @@
   }
 
   /**
+   * Server-side PDF metadata peek.
+   * @param {File} file
+   * @returns {Promise<{page_count: number|null, needs_ocr: boolean, filename: string}>}
+   */
+  async function peekPdf(file) {
+    const form = new FormData();
+    form.append("files", file);
+    const resp = await fetch("/peek/pdf", { method: "POST", body: form });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(errText || "PDF peek failed (" + resp.status + ")");
+    }
+    const data = await resp.json();
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error("Empty PDF peek response");
+    return {
+      page_count: row.page_count != null ? row.page_count : null,
+      needs_ocr: Boolean(row.needs_ocr),
+      filename: row.filename || file.name,
+    };
+  }
+
+  /**
+   * Format page count for display.
+   * @param {number|null} count
+   * @returns {string}
+   */
+  function formatPageCount(count) {
+    if (count == null) return "";
+    return count + " page" + (count !== 1 ? "s" : "");
+  }
+
+  /**
    * Server-side header peek for non-.eml files.
    * @param {File} file
    * @returns {Promise<{sender: string, date: string, subject: string}[]>}
@@ -178,7 +219,24 @@
   async function addFile(file) {
     const extension = ext(file.name);
     try {
-      if (extension === "eml") {
+      if (extension === "pdf") {
+        const meta = await peekPdf(file);
+        messages.push({
+          id: uid(),
+          file,
+          containerName: file.name,
+          messageIndex: 0,
+          sender: meta.filename || file.name,
+          date: "",
+          subject: formatPageCount(meta.page_count) || file.name,
+          status: "pending",
+          docId: null,
+          jobIndex: messages.length,
+          kind: "pdf",
+          pageCount: meta.page_count,
+          needsOcr: meta.needs_ocr,
+        });
+      } else if (extension === "eml") {
         const header = await peekEmlClient(file);
         messages.push({
           id: uid(),
@@ -191,6 +249,9 @@
           status: "pending",
           docId: null,
           jobIndex: messages.length,
+          kind: "email",
+          pageCount: null,
+          needsOcr: false,
         });
       } else {
         const headers = await peekServer(file);
@@ -206,6 +267,9 @@
             status: "pending",
             docId: null,
             jobIndex: messages.length,
+            kind: "email",
+            pageCount: null,
+            needsOcr: false,
           });
         } else {
           headers.forEach((header, idx) => {
@@ -220,6 +284,9 @@
               status: "pending",
               docId: null,
               jobIndex: messages.length,
+              kind: "email",
+              pageCount: null,
+              needsOcr: false,
             });
           });
         }
@@ -230,12 +297,15 @@
         file,
         containerName: file.name,
         messageIndex: 0,
-        sender: "(parse error)",
+        sender: extension === "pdf" ? file.name : "(parse error)",
         date: "",
         subject: String(err instanceof Error ? err.message : err),
         status: "pending",
         docId: null,
         jobIndex: messages.length,
+        kind: extension === "pdf" ? "pdf" : "email",
+        pageCount: null,
+        needsOcr: false,
       });
     }
     renderMessageList(fileList, messages, false);
@@ -262,8 +332,15 @@
     const row = el("div", "message-row");
     const header = el("div", "row-header");
     if (showStatus) header.appendChild(el("span", "badge " + item.status, item.status));
-    header.appendChild(el("span", "sender", item.sender));
-    header.appendChild(el("span", "date", item.date));
+    const isPdf = item.kind === "pdf" || ext(item.file.name) === "pdf";
+    if (isPdf) {
+      header.appendChild(el("span", "badge pdf", "PDF"));
+      if (item.needsOcr) header.appendChild(el("span", "badge scanned", "Scanned (OCR)"));
+      header.appendChild(el("span", "sender", item.sender || item.file.name));
+    } else {
+      header.appendChild(el("span", "sender", item.sender));
+      header.appendChild(el("span", "date", item.date));
+    }
     row.appendChild(header);
     row.appendChild(el("div", "subject", item.subject));
     if (item.containerName !== item.file.name || item.messageIndex > 0) {
@@ -534,7 +611,24 @@
   }
 
   /**
-   * Fetch server health for containerized flag.
+   * Update OCR availability hint below the dropzone.
+   */
+  function updateOcrHint() {
+    if (!ocrHint) return;
+    if (!ocrAvailable) {
+      ocrHint.textContent =
+        "OCR is not available on this server. Scanned PDFs will use text-layer extraction only. Install with uv sync --extra ocr.";
+      ocrHint.classList.remove("hidden");
+    } else if (!ocrEnabled) {
+      ocrHint.textContent = "OCR is installed but disabled (EMAILPARSE_OCR_ENABLED=false).";
+      ocrHint.classList.remove("hidden");
+    } else {
+      ocrHint.classList.add("hidden");
+    }
+  }
+
+  /**
+   * Fetch server health for containerized and OCR flags.
    */
   async function loadHealth() {
     try {
@@ -542,9 +636,15 @@
       if (resp.ok) {
         const data = await resp.json();
         serverContainerized = Boolean(data.containerized);
+        ocrAvailable = Boolean(data.ocr_available);
+        ocrEnabled = data.ocr_enabled !== false;
+        updateOcrHint();
       }
     } catch {
       serverContainerized = false;
+      ocrAvailable = false;
+      ocrEnabled = false;
+      updateOcrHint();
     }
   }
 
@@ -556,47 +656,81 @@
     currentJobId = jobId;
     setJobHash(jobId);
     setAppState("results");
-    await loadEmailList(jobId);
+    await loadDocumentList(jobId);
     await loadJobMetrics(jobId);
   }
 
   /**
-   * Load processed email list for a job.
+   * Load processed root documents (emails and PDFs) for a job.
    * @param {string} jobId
    */
-  async function loadEmailList(jobId) {
+  async function loadDocumentList(jobId) {
     clear(emailList);
     try {
-      const resp = await fetch("/jobs/" + encodeURIComponent(jobId) + "/emails");
-      if (!resp.ok) throw new Error("Failed to load emails");
-      const emails = await resp.json();
-      if (!Array.isArray(emails) || emails.length === 0) {
-        emailList.appendChild(el("p", "empty-hint", "No processed emails yet."));
+      const resp = await fetch("/jobs/" + encodeURIComponent(jobId) + "/documents");
+      if (!resp.ok) throw new Error("Failed to load documents");
+      const documents = await resp.json();
+      if (!Array.isArray(documents) || documents.length === 0) {
+        emailList.appendChild(el("p", "empty-hint", "No processed items yet."));
         return;
       }
-      emails.forEach((row) => {
+
+      let showOcrUnavailableToast = false;
+
+      documents.forEach((row) => {
         const docId = row.doc_id || row.docId;
+        const kind = row.kind || "email";
         const item = el("div", "email-row");
         if (docId === selectedEmailDocId) item.classList.add("selected");
+
         const header = el("div", "row-header");
         const badgeStatus = (row.status || "ok").toLowerCase();
         header.appendChild(el("span", "badge " + badgeStatus, badgeStatus));
-        header.appendChild(el("span", "sender", row.sender || "(unknown)"));
-        header.appendChild(el("span", "date", row.date || ""));
+
+        if (kind === "pdf") {
+          header.appendChild(el("span", "badge pdf", "PDF"));
+          if (row.needs_ocr) header.appendChild(el("span", "badge scanned", "Scanned"));
+        }
+
+        if (row.ocr_used) header.appendChild(el("span", "badge ocr", "OCR"));
+
+        if (kind === "pdf") {
+          header.appendChild(el("span", "sender", row.label || "(unnamed PDF)"));
+        } else {
+          header.appendChild(el("span", "sender", row.sender || "(unknown)"));
+          header.appendChild(el("span", "date", row.date || ""));
+        }
+
         item.appendChild(header);
-        item.appendChild(el("div", "subject", row.subject || "(no subject)"));
-        const meta = el("div", "filename", "");
-        meta.textContent = (row.attachment_count != null ? row.attachment_count + " attachments" : "");
-        item.appendChild(meta);
+
+        if (kind === "pdf") {
+          const pageText = formatPageCount(row.page_count);
+          if (pageText) item.appendChild(el("div", "subject", pageText));
+        } else {
+          item.appendChild(el("div", "subject", row.label || row.subject || "(no subject)"));
+          const meta = el("div", "filename", "");
+          meta.textContent = row.attachment_count != null ? row.attachment_count + " attachments" : "";
+          item.appendChild(meta);
+        }
+
+        if (row.needs_ocr && !ocrAvailable) showOcrUnavailableToast = true;
+
+        const detailLabel = kind === "pdf" ? (row.label || docId) : (row.label || row.subject || docId);
         item.addEventListener("click", () => {
           selectedEmailDocId = docId;
           detailStack = [];
-          loadDetail(docId, row.subject || docId);
+          loadDetail(docId, detailLabel);
           document.querySelectorAll(".email-row").forEach((n) => n.classList.remove("selected"));
           item.classList.add("selected");
         });
         emailList.appendChild(item);
       });
+
+      if (showOcrUnavailableToast) {
+        showToast(
+          "Some scanned PDFs need OCR, but OCR is not available on this server. Install with uv sync --extra ocr."
+        );
+      }
     } catch (err) {
       emailList.appendChild(el("p", "empty-hint", err instanceof Error ? err.message : String(err)));
     }

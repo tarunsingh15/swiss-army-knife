@@ -26,7 +26,9 @@ uv sync --extra web --extra dev
 | CLI / library only | `uv sync` |
 | + tests / lint | `uv sync --extra dev` |
 | + web UI / API | `uv sync --extra web` |
+| + scanned-PDF OCR | `uv sync --extra ocr` (adds `document-parser` + PaddleOCR) |
 | Full local dev | `uv sync --extra web --extra dev` |
+| Full dev + OCR | `uv sync --extra web --extra dev --extra ocr` |
 
 ### Generate fixtures (required)
 
@@ -42,6 +44,12 @@ This creates 15 `.eml` and `.truth.json` pairs under `tests/fixtures/synthetic/`
 
 ```bash
 uv run pytest tests -q
+```
+
+OCR integration tests are marked `@pytest.mark.ocr` and skip automatically when `document-parser` or PaddleOCR is not installed. Run them explicitly after `uv sync --extra ocr`:
+
+```bash
+uv run pytest tests -m ocr -q
 ```
 
 Verify fixtures first:
@@ -75,6 +83,9 @@ uv run email-parser metrics --corpus tests/fixtures/synthetic
 | `EMAILPARSE_MAX_FANOUT` | `200` | Maximum child documents per parent |
 | `EMAILPARSE_TOKEN_BUDGET` | `6000` | Token budget for context markdown |
 | `EMAILPARSE_PDF_ENGINE` | `pdf_pymupdf` | PDF parser plugin name |
+| `EMAILPARSE_OCR_ENABLED` | `true` | Master OCR switch when `document-parser` is installed |
+| `EMAILPARSE_OCR_DPI` | `200` | Rasterization DPI for OCR fallback |
+| `EMAILPARSE_OCR_MIN_CHARS` | `20` | Sparse-text threshold (total chars across pages) to trigger OCR |
 | `EMAILPARSE_DISPLAY_PATH_PREFIX` | `""` | Prefix for reveal-in-Finder paths (Docker sets `${PWD}/output`) |
 
 ### Troubleshooting
@@ -94,6 +105,7 @@ This project parses RFC 822 email files (`.eml`) and nested attachments into a c
 
 - MIME email parsing (headers, bodies, attachments, forwards, inline images)
 - PDF text extraction with page/bbox anchors via PyMuPDF
+- Optional OCR for scanned PDF attachments and direct PDF uploads (PaddleOCR via `document-parser`)
 - Plain-text attachments
 - Content-addressed storage under `output/`
 - SQLite + FTS5 search over chunked text
@@ -103,7 +115,7 @@ This project parses RFC 822 email files (`.eml`) and nested attachments into a c
 **Out of scope (this iteration)**
 
 - No embeddings or vector search
-- No OCR for scanned PDFs or images
+- No OCR for non-PDF images (JPEG/PNG attachments are not OCR'd in v1)
 - No PST, `.msg`, or full `.mbox` ingestion (header peek only for uploads)
 - No LLM in the parse path; parsing never calls a model
 
@@ -143,6 +155,14 @@ flowchart TD
 ```
 
 **Citation chain:** PDF blocks include `anchor.page` and `anchor.bbox`. The web API can render `/documents/{doc_id}/citations/{block_id}/thumbnail.png` from the stored blob. Email blocks use empty anchors for body text; quoted history is preserved as separate `quoted_history` blocks.
+
+**OCR fallback:** Born-digital extraction via `pdf_tool` always runs first. OCR via `document_parser` runs only when all of the following are true:
+
+1. `document-parser` is installed (`uv sync --extra ocr`) and `EMAILPARSE_OCR_ENABLED` is true
+2. The PDF needs OCR (`needs_ocr`, empty blocks, or total extracted chars below `EMAILPARSE_OCR_MIN_CHARS`)
+3. The PDF is a direct upload (root blob) or an email attachment / embedded / forwarded PDF child
+
+Born-digital PDFs with a usable text layer are never OCR'd. When OCR is unavailable, the parser keeps the pdf_tool result and adds a provenance warning.
 
 ## 3. `output/` layout
 
@@ -296,14 +316,16 @@ Base URL when running locally: `http://127.0.0.1:8000`
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/` | Web UI |
-| GET | `/health` | `{ok, containerized}` |
-| POST | `/peek` | Header-only preview for uploaded files |
+| GET | `/health` | `{ok, containerized, ocr_available, ocr_enabled}` |
+| POST | `/peek` | Header-only preview for uploaded `.eml` files |
+| POST | `/peek/pdf` | PDF metadata preview: `page_count`, `needs_ocr`, `filename` |
 | POST | `/jobs/golden` | Parse synthetic fixtures; return run + health metrics |
 | POST | `/jobs` | Upload files; start background parse job |
 | GET | `/jobs/{job_id}` | Job status, metrics, root document ids |
 | GET | `/jobs/{job_id}/events` | SSE progress stream |
 | POST | `/jobs/{job_id}/cancel` | Request cooperative cancellation |
-| GET | `/jobs/{job_id}/emails` | Root emails for a completed job |
+| GET | `/jobs/{job_id}/emails` | Root emails for a completed job (backward compat) |
+| GET | `/jobs/{job_id}/documents` | Root emails and direct-upload PDFs for the results sidebar |
 | GET | `/documents/{doc_id}` | Canonical document JSON |
 | GET | `/documents/{doc_id}/detail` | Document, children, storage paths |
 | GET | `/documents/{doc_id}/context` | Markdown context + token count |
@@ -317,15 +339,15 @@ Base URL when running locally: `http://127.0.0.1:8000`
 
 The web UI (`web/static/app.js`) has three panels:
 
-1. **Upload** — drop zone, file list, Submit and Clear. Peek headers before submit via `/peek`.
+1. **Upload** — drop zone accepts `.eml` and `.pdf`. Peek headers via `/peek` or PDF metadata via `/peek/pdf` (page count, scanned badge when `needs_ocr`). Hint text notes that scanned PDFs need `uv sync --extra ocr`.
 2. **Processing** — progress bar, per-file/per-document status, Cancel. Subscribes to `/jobs/{id}/events` SSE.
-3. **Results** — email list, detail pane with attachment tree, metrics view, context preview, search.
+3. **Results** — processed-items list (emails and PDFs) via `/jobs/{id}/documents`, detail pane with attachment tree, metrics view, context preview, search. Rows show PDF/OCR/scanned badges when applicable; a toast warns when scanned PDFs need OCR but it is unavailable.
 
 State transitions: Upload → Processing on submit; Processing → Results when the job reaches `done`; Cancel returns to Upload with a toast.
 
 ## 8. Limitations / next iteration
 
-- Scanned PDFs without a text layer produce empty or sparse blocks; OCR is not implemented.
+- Scanned PDFs without OCR installed produce empty or sparse blocks; install with `uv sync --extra ocr` (PaddleOCR may not support every Python version — tests skip live OCR when unavailable).
 - Unsupported formats (e.g. `.docx`, unknown binaries) become `unsupported` documents with warnings; the root email still parses when the unsupported file is an attachment.
 - Jobs and SSE state are in-memory; restarting the server loses active job handles (artifacts on disk remain).
 - `POST /files/reveal` works on macOS hosts only; disabled in Docker.

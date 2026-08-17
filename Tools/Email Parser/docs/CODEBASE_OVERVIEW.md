@@ -35,7 +35,12 @@ Every file type parser emits the same `Document` shape. Parent/child relationshi
 | `scripts/` | Fixture fetch helpers |
 | `output/` | Default artifact root (`EMAILPARSE_OUTPUT_DIR`) |
 
-Sibling project: [`Tools/pdf_tool`](../pdf_tool/) — standalone PDF extraction (generic models, PyMuPDF engine, CLI).
+Sibling projects:
+
+| Project | Role |
+|---------|------|
+| [`Tools/pdf_tool`](../pdf_tool/) | Born-digital PDF extraction (generic models, PyMuPDF engine, CLI) |
+| [`Tools/document_parser`](../document_parser/) | Optional scanned-PDF OCR (PaddleOCR backend); installed via `uv sync --extra ocr` |
 
 ## Standalone PDF tool (`Tools/pdf_tool/`)
 
@@ -49,7 +54,21 @@ Generic PDF extraction, usable without the email parser:
 
 Public API (`from pdf_tool import parse_pdf, search_quote, render_thumbnail, is_pdf`).
 
-The email parser integrates via a thin adapter at `email_parser/file_parsers/pdf_pymupdf.py` that maps `pdf_tool` results into `Document` / `Block` models.
+The email parser integrates via a thin adapter at `email_parser/file_parsers/pdf_pymupdf.py` that maps `pdf_tool` results into `Document` / `Block` models. When born-digital extraction is insufficient (`needs_ocr`, empty blocks, or chars below `EMAILPARSE_OCR_MIN_CHARS`), the adapter may fall back to `document_parser` **only** for PDF attachments and direct PDF uploads — never for born-digital PDFs that already extracted text.
+
+## Standalone OCR tool (`Tools/document_parser/`)
+
+Optional scanned-PDF OCR, installed with `uv sync --extra ocr`:
+
+| Module | Purpose |
+|--------|---------|
+| `models.py` | `DocBlock`, `DocMetadata`, `DocParseResult` — mirrors pdf_tool field names |
+| `raster.py` | **Only module that imports PyMuPDF** in document_parser |
+| `ocr/paddle_engine.py` | **Only module that imports PaddleOCR** |
+| `pdf.py` | Orchestration: rasterize → OCR → paragraph blocks |
+| `cli.py` | `doc-parser parse <file.pdf>` |
+
+Public API (`from document_parser import parse_pdf, is_available`). When the package or PaddleOCR is missing, `is_available()` is `False` and the email-parser adapter keeps the pdf_tool result with a provenance warning.
 
 ## Core library (`email_parser/`)
 
@@ -64,6 +83,8 @@ Canonical data contracts:
 
 `root_emails()` counts documents where `parent_id is None` **and** `source_type == email`. Mis-routed `.eml` files parsed as `text` will not appear in the web UI email list.
 
+`root_documents()` returns top-level emails **and** direct-upload PDFs (`source_type` in `{email, pdf}`). The web UI sidebar uses this list.
+
 ### `ids.py`
 
 Content-addressed, deterministic identifiers:
@@ -74,7 +95,7 @@ Content-addressed, deterministic identifiers:
 
 ### `config.py`
 
-Settings from `EMAILPARSE_*` environment variables: `output_dir`, `max_depth`, `max_fanout`, `pdf_engine`, `token_budget`.
+Settings from `EMAILPARSE_*` environment variables: `output_dir`, `max_depth`, `max_fanout`, `pdf_engine`, `token_budget`, and OCR flags (`ocr_enabled`, `ocr_dpi`, `ocr_min_chars`).
 
 ### `pipeline.py`
 
@@ -97,7 +118,8 @@ Orchestration layer used by CLI and web jobs:
 
 - `parse_file()` — read disk → `process()`
 - `persist_run()` — write all artifacts and index rows for one run
-- `root_emails()` — filter top-level email documents for UI listing
+- `root_emails()` — filter top-level email documents (metrics backward compat)
+- `root_documents()` — filter top-level emails and direct-upload PDFs for UI listing
 - `parse_and_store()` — batch CLI entry point
 
 `persist_run()` builds per-root **context markdown** and **chunks** from each document family sharing a `root_id`.
@@ -109,7 +131,7 @@ Plug-in parsers implementing the `Parser` protocol in `base.py`:
 | Module | Parser name | Handles |
 |--------|-------------|---------|
 | `email_mime.py` | `email_mime` | RFC 822 / MIME; emits child blobs for attachments, forwards, inline images |
-| `pdf_pymupdf.py` | `pdf_pymupdf` | **Adapter** — delegates to `pdf_tool`, maps to email-parser models |
+| `pdf_pymupdf.py` | `pdf_pymupdf` | **Adapter** — delegates to `pdf_tool`; optional `document_parser` OCR fallback via `should_run_ocr()` |
 | `text_plain.py` | `text_plain` | Plain text attachments |
 
 #### `registry.py`
@@ -188,11 +210,14 @@ HTTP API and UI:
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /` | Serve `index.html` |
+| `GET /health` | Liveness + `ocr_available`, `ocr_enabled` |
 | `POST /peek` | Header-only preview without full parse |
+| `POST /peek/pdf` | PDF metadata preview: page count, `needs_ocr`, filename |
 | `POST /jobs` | Upload files, start background job |
 | `GET /jobs/{id}` | Status + metrics |
 | `GET /jobs/{id}/events` | SSE progress stream (`response_class=EventSourceResponse`) |
-| `GET /jobs/{id}/emails` | Root email summaries for results panel |
+| `GET /jobs/{id}/emails` | Root email summaries (backward compat; same rows as `/documents` for emails) |
+| `GET /jobs/{id}/documents` | Root emails + direct-upload PDFs for results sidebar |
 | `GET /documents/{id}` | Canonical document JSON |
 | `GET /documents/{id}/detail` | Document + children + storage paths |
 | `GET /documents/{id}/context` | Markdown context + token count |
@@ -207,7 +232,7 @@ Lightweight RFC 822 header extraction for the upload preview UI (subject, sender
 
 ### `static/`
 
-Vanilla JS UI (`app.js`, `app.css`): drag-drop upload, SSE job progress, results panel, document detail inspector.
+Vanilla JS UI (`app.js`, `app.css`): drag-drop upload for `.eml` and `.pdf`, PDF peek via `/peek/pdf`, SSE job progress, processed-items sidebar via `/jobs/{id}/documents`, OCR/scanned badges when applicable.
 
 ## Tests (`tests/`)
 
@@ -216,7 +241,7 @@ Vanilla JS UI (`app.js`, `app.css`): drag-drop upload, SSE job progress, results
 | API / SSE | `test_api.py` |
 | Parser routing | `test_registry.py` |
 | Email MIME | `test_mime_structure.py`, `test_cid_linkage.py`, `test_quoting.py` |
-| PDF | `test_pdf_pymupdf.py` |
+| PDF | `test_pdf_pymupdf.py` (OCR gate + `@pytest.mark.ocr` integration) |
 | Determinism | `test_determinism.py`, `test_snapshots.py` |
 | Invariants | `test_invariants.py` |
 | Storage | `test_storage.py` |
