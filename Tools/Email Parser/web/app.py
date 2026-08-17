@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create shared resources for the app lifetime."""
+    # Parsing is CPU-heavy; keep the event loop free for SSE and uploads.
     app.state.process_pool = ProcessPoolExecutor(max_workers=2)
     yield
     app.state.process_pool.shutdown(wait=False)

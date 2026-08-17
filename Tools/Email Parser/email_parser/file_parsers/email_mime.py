@@ -50,8 +50,15 @@ _HEADER_PREFIXES = (
     b"Received:",
     b"MIME-Version:",
     b"From ",
+    b"Delivered-To:",  # Gmail exports often start here instead of From:
+    b"To:",
+    b"Subject:",
+    b"Date:",
+    b"Message-ID:",
+    b"Content-Type:",
 )
-_SNIFF_WINDOW = 2048
+# Gmail exports can have multi-kB Received chains before From: appears.
+_SNIFF_WINDOW = 8192
 
 
 def _normalize_cid(value: str) -> str:
@@ -195,7 +202,21 @@ def _looks_like_email_sniff(sniffed: bytes) -> bool:
     window = sniffed[:_SNIFF_WINDOW]
     if any(window.startswith(prefix) for prefix in _HEADER_PREFIXES):
         return True
-    return b"\nFrom:" in window
+    # From:/Subject: may appear after long Received chains; stay inside header block.
+    header_block = window.split(b"\r\n\r\n", 1)[0]
+    for marker in (
+        b"\nFrom:",
+        b"\r\nFrom:",
+        b"\nSubject:",
+        b"\r\nSubject:",
+        b"\nTo:",
+        b"\r\nTo:",
+        b"\nMIME-Version:",
+        b"\r\nMIME-Version:",
+    ):
+        if marker in header_block:
+            return True
+    return False
 
 
 def _is_forwarded_part(part: Message) -> bool:
@@ -226,6 +247,7 @@ def _is_attachment_part(part: Message) -> bool:
 
 def _choose_alternative_part(parts: list[Message]) -> Message | None:
     """Pick one multipart/alternative body, preferring HTML over plain text."""
+    # Emit a single canonical body to keep token counts deterministic for RAG.
     html_part: Message | None = None
     plain_part: Message | None = None
     for part in parts:

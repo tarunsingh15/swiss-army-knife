@@ -15,7 +15,7 @@ from email_parser.models import Document
 from email_parser.run import parse_file, persist_run, root_emails
 
 JOBS: dict[str, Job] = {}
-JOBS_LOCK = threading.Lock()
+JOBS_LOCK = threading.Lock()  # Shared by async routes and process-pool workers.
 
 
 @dataclass
@@ -72,6 +72,7 @@ async def _parse_path(path_str: str, app: Any) -> list[dict]:
     loop = asyncio.get_running_loop()
     pool = app.state.process_pool
     try:
+        # CPU-bound parse off the event loop; returns JSON-serializable dicts.
         return await loop.run_in_executor(pool, parse_one, path_str)
     except Exception:
         return await asyncio.to_thread(parse_one, path_str)
@@ -150,6 +151,7 @@ async def run_job(job_id: str, app: Any, settings: Settings | None = None) -> No
 
     metrics = _build_run_metrics(all_docs, len(job.paths))
     try:
+        # run_id doubles as job_id so output/runs/<job_id>/ matches the web job.
         persist_run(
             all_docs,
             raw_by_id=raw_by_id,

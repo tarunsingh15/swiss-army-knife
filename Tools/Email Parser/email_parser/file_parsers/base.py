@@ -34,7 +34,11 @@ class ParseContext:
 
 @dataclass
 class ParseResult:
-    """A parsed document plus child blobs for the pipeline to enqueue."""
+    """A parsed document plus child blobs for the pipeline to enqueue.
+
+    Parsers must not recurse: return child blobs and let pipeline.process()
+    walk the tree with depth/fanout guards.
+    """
 
     document: Document
     child_blobs: list[Blob] = field(default_factory=list)

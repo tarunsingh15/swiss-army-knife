@@ -104,7 +104,10 @@ def sniff_mime(raw: bytes, declared: str | None) -> str:
                 return guessed
         matches = puremagic.magic_string(raw)
         if matches:
-            return matches[0].mime_type
+            mime = matches[0].mime_type
+            # puremagic can return an empty string; treat that as "no guess".
+            if mime:
+                return mime
     except Exception:
         pass
     return fallback
@@ -122,16 +125,27 @@ def resolve_parser(
     mime_type: str | None = None,
     *,
     pdf_engine: str = "pdf_pymupdf",
+    filename: str | None = None,
 ) -> Parser | None:
     """Pick the best parser for raw bytes and an optional declared MIME type."""
     sniffed = raw[:2048] if len(raw) > 2048 else raw
     resolved_mime = sniff_mime(raw, mime_type)
+    # Uploaded .eml files often sniff as octet-stream or text/plain (Gmail exports
+    # start with Delivered-To:/Received:). Force RFC 822 unless bytes are PDF.
+    if (
+        filename
+        and filename.lower().endswith((".eml", ".mime"))
+        and sniffed[:5] != _PDF_MAGIC
+        and resolved_mime not in _PDF_MIME_TYPES
+    ):
+        resolved_mime = "message/rfc822"
     candidates = [p for p in load_parsers() if p.can_handle(resolved_mime, sniffed)]
     if not candidates:
         return None
 
     pdf_claimants = [p for p in candidates if _is_pdf_claim(p, resolved_mime, sniffed)]
     if len(pdf_claimants) > 1:
+        # Mislabeled PDFs (e.g. text/plain + %PDF- magic) need explicit tie-break.
         best = max(pdf_claimants, key=lambda p: p.priority)
         if pdf_engine != "pdf_pymupdf":
             for parser in pdf_claimants:

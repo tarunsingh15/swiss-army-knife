@@ -116,6 +116,7 @@ Run `uv run python tests/fixtures/generate.py`. Synthetic fixtures are generated
 
 ## Documentation
 
+- [Codebase Overview](docs/CODEBASE_OVERVIEW.md) — developer map of modules and data flow
 - [User Manual](docs/USER_MANUAL.md) — architecture, output layout, design choices, API, CLI
 - [Manual Steps](docs/MANUAL_STEPS.md) — setup and hands-on test checklist
 - [Adding a Parser](docs/ADDING_A_PARSER.md) — plug-in protocol and worked example

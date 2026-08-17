@@ -121,6 +121,24 @@ def test_job_upload_poll_and_document_endpoints(client: TestClient) -> None:
     assert context["token_count"] >= 0
 
 
+def test_headerless_eml_upload_counts_as_root_email(client: TestClient) -> None:
+    """`.eml` files route to email_mime even when magic sniff is inconclusive."""
+    raw = b"This is plain text without RFC 822 headers."
+    create = client.post(
+        "/jobs",
+        files=[("files", ("headerless.eml", raw))],
+    )
+    assert create.status_code == 200
+    job_id = create.json()["job_id"]
+
+    status = _wait_for_job(client, job_id)
+    assert status["status"] == "done"
+    assert status["metrics"]["root_emails"] == 1
+
+    emails = client.get(f"/jobs/{job_id}/emails").json()
+    assert len(emails) == 1
+
+
 def test_missing_document_returns_404(client: TestClient) -> None:
     """Unknown documents return 404."""
     response = client.get("/documents/sha256:does-not-exist")
@@ -170,6 +188,23 @@ def test_files_blob_content_type_for_pdf(client: TestClient) -> None:
     assert blob.status_code == 200
     assert blob.headers["content-type"].startswith("application/pdf")
     assert blob.content.startswith(b"%PDF")
+
+
+def test_job_events_sse_stream(client: TestClient) -> None:
+    """GET /jobs/{id}/events streams SSE until the job finishes."""
+    eml = _make_eml(subject="SSE Subject")
+    create = client.post(
+        "/jobs",
+        files=[("files", ("sample.eml", eml, "message/rfc822"))],
+    )
+    job_id = create.json()["job_id"]
+
+    with client.stream("GET", f"/jobs/{job_id}/events") as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        body = response.read().decode("utf-8")
+
+    assert 'data: {"type": "final"' in body or '"status": "done"' in body
 
 
 def test_golden_endpoint(client: TestClient) -> None:

@@ -138,6 +138,7 @@ class Block(BaseModel):
     type: BlockType
     text: str | None = None
     rows: list[list[str]] | None = None
+    # Points from an image_ref block in the parent doc to the inline image child doc.
     child_doc_id: str | None = None
     anchor: Anchor | None = None
 
@@ -151,11 +152,11 @@ class Document(BaseModel):
     source_type: SourceType
     mime_type: str
     root_id: str | None = None
-    parent_id: str | None = None
-    relation_to_parent: RelationType | None = None
+    parent_id: str | None = None  # null for uploaded roots
+    relation_to_parent: RelationType | None = None  # attachment, inline_image, etc.
     depth: int = 0
     ordinal: int = 0
-    path: str = ""
+    path: str = ""  # e.g. attachment[0]/embedded_file[1]
     metadata: DocumentMetadata = Field(default_factory=DocumentMetadata)
     blocks: list[Block] = Field(default_factory=list)
     extractions: list[Extraction] = Field(default_factory=list)

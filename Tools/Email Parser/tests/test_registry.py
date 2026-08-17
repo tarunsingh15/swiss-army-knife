@@ -11,7 +11,9 @@ from email_parser.file_parsers.registry import (
     sniff_mime,
     unsupported_document,
 )
-from email_parser.models import ParseStatus
+from email_parser.models import ParseStatus, SourceType
+from email_parser.pipeline import process
+from email_parser.run import root_emails
 
 
 def _minimal_pdf() -> bytes:
@@ -77,3 +79,36 @@ def test_email_header_sniff_routes_to_email_mime() -> None:
     parser = resolve_parser(raw, "application/octet-stream")
     assert parser is not None
     assert parser.name == "email_mime"
+
+
+def test_gmail_style_delivered_to_routes_to_email_mime() -> None:
+    """Gmail exports that start with Delivered-To still route to email_mime."""
+    padding = b"Received: by relay.example.com;\r\n" * 120
+    raw = (
+        b"Delivered-To: user@example.com\r\n"
+        + padding
+        + b"From: sender@example.com\r\n"
+        b"To: user@example.com\r\n"
+        b"Subject: Gmail export\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"\r\n"
+        b"Body text\r\n"
+    )
+    parser = resolve_parser(raw, "application/octet-stream", filename="message.eml")
+    assert parser is not None
+    assert parser.name == "email_mime"
+
+
+def test_eml_extension_routes_headerless_ascii_to_email_mime() -> None:
+    """`.eml` uploads route to email_mime even when magic sniff is inconclusive."""
+    raw = b"This is plain text without RFC 822 headers."
+    assert sniff_mime(raw, None) == "application/octet-stream"
+    parser = resolve_parser(raw, None, filename="saved.eml")
+    assert parser is not None
+    assert parser.name == "email_mime"
+
+    documents = process(Blob(raw=raw, filename="saved.eml"))
+    assert len(documents) == 1
+    assert documents[0].source_type == SourceType.email
+    assert len(root_emails(documents)) == 1

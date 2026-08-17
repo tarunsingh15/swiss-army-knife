@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel
 
 from email_parser.ai_context.citations import render_thumbnail
@@ -33,31 +34,6 @@ class RevealRequest(BaseModel):
     """Request body for revealing a stored file in the host file manager."""
 
     doc_id: str
-
-
-def _sse_response(request: Request, generator):
-    """Return an SSE response using the best available backend."""
-    try:
-        from fastapi.sse import EventSourceResponse
-
-        return EventSourceResponse(generator, request=request)
-    except ImportError:
-        pass
-    try:
-        from sse_starlette.sse import EventSourceResponse as StarletteEventSourceResponse
-
-        return StarletteEventSourceResponse(generator)
-    except ImportError:
-        pass
-
-    async def stream():
-        async for payload in generator:
-            if isinstance(payload, dict):
-                yield f"data: {json.dumps(payload, sort_keys=True)}\n\n"
-            else:
-                yield payload
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 def _storage_paths_dict(store: Store, doc_id: str, doc: Document | None = None) -> dict[str, str]:
@@ -93,6 +69,7 @@ def _find_blob_path(store: Store, doc_id: str) -> Path | None:
 
 def _load_document_dict(doc_id: str) -> dict | None:
     """Load a document from in-memory jobs or on-disk storage."""
+    # Prefer hot in-memory job results; fall back to persisted JSON after restart.
     with JOBS_LOCK:
         for job in JOBS.values():
             for item in job.documents:
@@ -289,31 +266,28 @@ async def get_job_status(job_id: str) -> dict[str, Any]:
     }
 
 
-@router.get("/jobs/{job_id}/events")
+@router.get("/jobs/{job_id}/events", response_class=EventSourceResponse)
 async def job_events(request: Request, job_id: str):
     """Stream job progress events over Server-Sent Events."""
     job = get_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    async def event_generator():
-        seen = 0
-        while True:
-            if await request.is_disconnected():
-                break
-            with JOBS_LOCK:
-                current_status = job.status
-                pending = job.events[seen:]
-                seen = len(job.events)
-            for event in pending:
-                yield {"data": json.dumps(event, sort_keys=True)}
-            if current_status in {"done", "cancelled", "error"}:
-                final = {"type": "final", "status": current_status, "metrics": job.metrics}
-                yield {"data": json.dumps(final, sort_keys=True)}
-                break
-            await asyncio.sleep(0.05)
-
-    return _sse_response(request, event_generator())
+    # FastAPI encodes yielded dicts as SSE when response_class=EventSourceResponse.
+    seen = 0
+    while True:
+        if await request.is_disconnected():
+            break
+        with JOBS_LOCK:
+            current_status = job.status
+            pending = job.events[seen:]
+            seen = len(job.events)
+        for event in pending:
+            yield event
+        if current_status in {"done", "cancelled", "error"}:
+            yield {"type": "final", "status": current_status, "metrics": job.metrics}
+            break
+        await asyncio.sleep(0.05)
 
 
 @router.post("/jobs/{job_id}/cancel")

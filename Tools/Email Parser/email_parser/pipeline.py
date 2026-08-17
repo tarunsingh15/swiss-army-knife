@@ -88,8 +88,10 @@ def process(
 ) -> list[Document]:
     """Parse root and descendants. Return all documents including failed/unsupported."""
     settings = settings or load_settings()
+    # BFS worklist: (blob, parent_id, root_id, depth, ordinal, path)
     queue: deque[tuple[Blob, str | None, str | None, int, int, str]] = deque()
     queue.append((root_blob, None, None, 0, root_blob.ordinal, ""))
+    # Dedup identical payloads so the same attachment bytes are not parsed twice.
     seen: set[str] = set()
     docs: list[Document] = []
 
@@ -128,6 +130,7 @@ def process(
 
         digest = content_hash(blob.raw)
         if digest in seen:
+            # Same bytes may appear as both an attachment and an inline part.
             continue
         seen.add(digest)
 
@@ -141,7 +144,12 @@ def process(
             pdf_engine=settings.pdf_engine,
         )
 
-        parser = resolve_parser(blob.raw, blob.mime_type, pdf_engine=settings.pdf_engine)
+        parser = resolve_parser(
+            blob.raw,
+            blob.mime_type,
+            pdf_engine=settings.pdf_engine,
+            filename=blob.filename,
+        )
         if parser is None:
             document = unsupported_document(blob, ctx, sniffed_type)
             document = _stamp_document(
@@ -172,6 +180,7 @@ def process(
             result = ParseResult(document=document, child_blobs=[])
 
         effective_root_id = root_id or document.doc_id
+        # Parsers emit doc_id but not lineage; the pipeline owns tree fields.
         document = _stamp_document(
             document,
             root_id=effective_root_id,
@@ -209,6 +218,7 @@ def process(
         for index, child in enumerate(child_blobs):
             relation = child.relation_to_parent or "child"
             child_ordinal = child.ordinal if child.ordinal else index
+            # Human-readable lineage, e.g. attachment[0]/embedded_file[1]
             child_path = (
                 f"{path}/{relation}[{child_ordinal}]"
                 if path

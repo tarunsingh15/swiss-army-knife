@@ -42,7 +42,7 @@ class Store:
     def paths(self, doc_id: str, ext: str = "bin") -> StoragePaths:
         """Return absolute local paths for a document's artifacts."""
         hex_id = _hex_from_doc_id(doc_id)
-        hh = hash_prefix(doc_id)
+        hh = hash_prefix(doc_id)  # Shard blobs/documents into 256 buckets.
         blob = self.output_dir / "blobs" / hh / f"{hex_id}.{ext}"
         document_json = self.output_dir / "documents" / hh / f"{hex_id}.json"
         context_md = self.output_dir / "context" / f"{doc_id}.md"

@@ -18,6 +18,7 @@ def make_doc_id(raw_bytes: bytes) -> str:
 
 def hash_prefix(doc_id: str, width: int = 2) -> str:
     """Return the first `width` hex chars after the sha256: prefix for sharding."""
+    # Used as blobs/<hh>/ and documents/<hh>/ directory names.
     hex_part = doc_id.split(":", 1)[-1]
     return hex_part[:width]
 

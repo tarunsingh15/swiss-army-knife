@@ -390,7 +390,13 @@
       updateProgress(done, total);
     }
 
-    if (type === "job_done" || type === "complete" || type === "finished") {
+    if (
+      type === "job_done" ||
+      type === "complete" ||
+      type === "finished" ||
+      type === "final" ||
+      (type === "status" && ["done", "complete", "error", "cancelled"].includes(String(evt.status || "").toLowerCase()))
+    ) {
       closeEventSource();
       enterResults(currentJobId);
     }

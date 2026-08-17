@@ -56,6 +56,7 @@ def persist_run(
 
     roots = [d for d in documents if d.parent_id is None]
     for root in roots:
+        # Context and chunks are built per email family (all docs sharing root_id).
         family = [d for d in documents if (d.root_id or d.doc_id) == (root.root_id or root.doc_id)]
         markdown = render_context(family, token_budget=settings.token_budget)
         store.write_context(root.doc_id, markdown)
@@ -107,6 +108,7 @@ def parse_and_store(
 
 def root_emails(documents: list[Document]) -> list[Document]:
     """Return top-level email documents from a parse result."""
+    # Web UI "processed emails" list; excludes PDF/text roots mis-parsed from .eml.
     return [
         d
         for d in documents
