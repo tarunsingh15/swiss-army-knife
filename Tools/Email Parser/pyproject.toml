@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "pydantic>=2",
-  "pymupdf==1.28.2",
+  "pdf-tool",
   "puremagic",
   "selectolax",
   "charset-normalizer",
@@ -44,6 +44,9 @@ text_plain = "email_parser.file_parsers.text_plain:TextPlainParser"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+pdf-tool = { path = "../pdf_tool", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["email_parser", "web"]

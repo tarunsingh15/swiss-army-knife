@@ -58,6 +58,24 @@ uv run email-parser metrics --corpus tests/fixtures/synthetic
 uv run email-parser compare output/runs/A output/runs/B
 ```
 
+### PDF tool (standalone)
+
+The PDF extraction tool lives in the sibling project [`Tools/pdf_tool`](../pdf_tool/). From that directory:
+
+```bash
+cd ../pdf_tool
+uv sync --extra dev
+uv run pdf-tool version
+uv run pdf-tool parse path/to/document.pdf
+```
+
+Or from Python (with `pdf-tool` installed as a dependency):
+
+```python
+from pdf_tool import parse_pdf
+result = parse_pdf(path.read_bytes(), filename="doc.pdf")
+```
+
 ### Docker
 
 ```bash

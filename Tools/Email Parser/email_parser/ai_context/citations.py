@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from email_parser.file_parsers.pdf_pymupdf import PdfPymupdfParser
+from pdf_tool import render_thumbnail as pdf_render_thumbnail
+from pdf_tool import search_quote as pdf_search_quote
+
 from email_parser.models import Document
 
 
@@ -31,7 +33,7 @@ def resolve_quote(
     clip: tuple[float, float, float, float] | None = None,
 ) -> list[list[float]]:
     """Search a PDF page for quote text and return quad point lists."""
-    return PdfPymupdfParser().search_quote(raw_pdf, quote, clip, page)
+    return pdf_search_quote(raw_pdf, quote, page=page, clip=clip)
 
 
 def render_thumbnail(
@@ -41,4 +43,4 @@ def render_thumbnail(
     dpi: int = 150,
 ) -> bytes:
     """Render a clipped PNG thumbnail for a PDF page region."""
-    return PdfPymupdfParser().render_thumbnail(raw_pdf, page, clip, dpi=dpi)
+    return pdf_render_thumbnail(raw_pdf, page, clip, dpi=dpi)

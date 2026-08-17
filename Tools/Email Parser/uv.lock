@@ -277,9 +277,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "charset-normalizer" },
+    { name = "pdf-tool" },
     { name = "puremagic" },
     { name = "pydantic" },
-    { name = "pymupdf" },
     { name = "quotequail" },
     { name = "selectolax" },
     { name = "tiktoken" },
@@ -313,9 +313,9 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'" },
     { name = "jinja2", marker = "extra == 'web'" },
     { name = "mypy", marker = "extra == 'dev'" },
+    { name = "pdf-tool", editable = "../pdf_tool" },
     { name = "puremagic" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pymupdf", specifier = "==1.28.2" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "python-multipart", marker = "extra == 'web'" },
     { name = "quotequail" },
@@ -749,6 +749,26 @@ sdist = { url = "https://files.pythonhosted.org/packages/5a/82/42f767fc1c1143d6f
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f1/d9/7fb5aa316bc299258e68c73ba3bddbc499654a07f151cba08f6153988714/pathspec-1.1.1-py3-none-any.whl", hash = "sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189", size = 57328, upload-time = "2026-04-27T01:46:07.06Z" },
 ]
+
+[[package]]
+name = "pdf-tool"
+version = "0.1.0"
+source = { editable = "../pdf_tool" }
+dependencies = [
+    { name = "puremagic" },
+    { name = "pymupdf" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "puremagic" },
+    { name = "pymupdf", specifier = "==1.28.2" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "ruff", marker = "extra == 'dev'" },
+    { name = "typer" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "pluggy"

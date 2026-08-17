@@ -35,6 +35,22 @@ Every file type parser emits the same `Document` shape. Parent/child relationshi
 | `scripts/` | Fixture fetch helpers |
 | `output/` | Default artifact root (`EMAILPARSE_OUTPUT_DIR`) |
 
+Sibling project: [`Tools/pdf_tool`](../pdf_tool/) — standalone PDF extraction (generic models, PyMuPDF engine, CLI).
+
+## Standalone PDF tool (`Tools/pdf_tool/`)
+
+Generic PDF extraction, usable without the email parser:
+
+| Module | Purpose |
+|--------|---------|
+| `models.py` | `PdfBlock`, `PdfMetadata`, `PdfParseResult`, `EmbeddedFile` |
+| `pymupdf_engine.py` | **Only module that imports PyMuPDF** |
+| `cli.py` | `pdf-tool parse <file.pdf>` and `pdf-tool version` |
+
+Public API (`from pdf_tool import parse_pdf, search_quote, render_thumbnail, is_pdf`).
+
+The email parser integrates via a thin adapter at `email_parser/file_parsers/pdf_pymupdf.py` that maps `pdf_tool` results into `Document` / `Block` models.
+
 ## Core library (`email_parser/`)
 
 ### `models.py`
@@ -93,7 +109,7 @@ Plug-in parsers implementing the `Parser` protocol in `base.py`:
 | Module | Parser name | Handles |
 |--------|-------------|---------|
 | `email_mime.py` | `email_mime` | RFC 822 / MIME; emits child blobs for attachments, forwards, inline images |
-| `pdf_pymupdf.py` | `pdf_pymupdf` | PDF text, tables, form fields; blocks carry page `anchor` |
+| `pdf_pymupdf.py` | `pdf_pymupdf` | **Adapter** — delegates to `pdf_tool`, maps to email-parser models |
 | `text_plain.py` | `text_plain` | Plain text attachments |
 
 #### `registry.py`

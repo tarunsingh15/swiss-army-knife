@@ -130,18 +130,19 @@ def test_corrupt_bytes_yield_failed_status() -> None:
     assert child_blobs == []
 
 
-def test_pymupdf_import_only_in_parser_module() -> None:
-    """PyMuPDF import statements exist only in pdf_pymupdf.py under email_parser/."""
+def test_pymupdf_import_only_in_pdf_tool_engine() -> None:
+    """PyMuPDF import statements exist only in pdf_tool/pymupdf_engine.py."""
     repo_root = Path(__file__).resolve().parents[1]
-    allowed = repo_root / "email_parser" / "file_parsers" / "pdf_pymupdf.py"
+    allowed = (repo_root / ".." / "pdf_tool" / "pdf_tool" / "pymupdf_engine.py").resolve()
     import_pattern = re.compile(r"^\s*(import pymupdf|from pymupdf\b)", re.MULTILINE)
     offenders: list[str] = []
-    for path in repo_root.glob("email_parser/**/*.py"):
-        if path.resolve() == allowed.resolve():
-            continue
-        text = path.read_text(encoding="utf-8")
-        if import_pattern.search(text):
-            offenders.append(str(path.relative_to(repo_root)))
+    for root_name in ("email_parser", "web"):
+        for path in (repo_root / root_name).glob("**/*.py"):
+            if path.resolve() == allowed.resolve():
+                continue
+            text = path.read_text(encoding="utf-8")
+            if import_pattern.search(text):
+                offenders.append(str(path.relative_to(repo_root)))
     assert offenders == []
 
 
